@@ -1,21 +1,82 @@
-var http =require('http');
 var express = require('express');
-var fs = require("fs");
+var routes = require('./routes');
+var http = require('http');
+var path = require('path');
+var urlencoded = require('url');
+var bodyparser = require('body-parser');
+//var json = require('json');
+var logger = require('logger');
+var methodOverride = require('method-override');
 
+var nano = require('nano')('http://localhost:5984');
+var db = nano.use('address');
 var app = express();
-var server = http.createServer(app);
 
-app.get('/', function(req,res){
-    res.send("<h1>Express Works!</h1>");
-});
-app.get('/tasks', function(req,res){
-    fs.readFile('./db.json', function(err,data){
-        var task = JSON.parse(data.toString()).task;
-        res.json(task);
-    })
-    // res.send("<h1>Task Work!</h1>");
+app.set('port', process.env.PORT || 3000);
+app.set('views', path.join(__dirname, 'views'));
+app.set('view engine', 'jade');
+
+app.use(bodyparser.json());
+app.use(bodyparser.urlencoded());
+app.use(methodOverride());
+app.use(express.static(path.join(__dirname,'public')));
+
+app.get('/', routes.index);
+app.post('/createdb', function(req,res){
+    nano.db.create(req.body.dbname, function(err){
+        if(err){
+            res.send("Error creating Database" + req.body.dbname);
+            return;
+        }
+        res.send("Database"+ req.body.dbname + "Created Successfully!");
+    });
 });
 
-server.listen(3000, function(){
-    console.log("Server is responding on 3000");
+app.post('/new_contact', function(req,res){
+    var name = req.body.name;
+    var phone = req.body.phone;
+
+    db.insert({name : name, phone:phone, crazy:true}, phone, function(err,body,header){
+        if(err){
+            res.send("Error creating Contacts");
+            return;
+        }
+        res.send("Contact created successfully!");
+    });
 });
+
+app.post('/view_contact', function(req,res){
+    var alldoc = "Following are the contacts";
+
+    db.get(req.body.phone, {revs_info:true}, function(err,body){
+        if(!err){
+            console.log(body);
+        }
+        if(body){
+            alldoc += "Name" + body.name + "<br/>Phone Number:" + body.phone;
+        }
+        else{
+            alldoc = "No records found";
+        }
+        res.send(alldoc);
+    });
+});
+
+app.post('/delete_contact', function(req,res){
+    db.get(req.body.phone, {revs_info:true}, function(err,body){
+        if(!err){
+            db.destroy(req.body.phone, body._rev, function(err,data){
+                if(err){
+                    res.send("error deleting contact");
+                }
+            });
+        
+            res.send("Contacts deleted successfully");
+        }
+    });
+});
+
+http.createServer(app).listen(app.get('port'), function(){
+    console.log("Express server is listening at port "+ app.get('port'));
+})
+
